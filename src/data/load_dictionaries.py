@@ -1,25 +1,18 @@
+from functools import partial
+
 import dotenv
 import requests
 from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
 
-BASE_URL = 'https://api.hh.ru/'
+from src.data.api import get_dictionaries
 
 
-def get_dictionaries():
-    url = BASE_URL + 'dictionaries'
-    response = requests.get(url)
+def save_dictionary(name, values, db: Database, drop_if_exists=True):
+    if drop_if_exists:
+        db.drop_collection(name)
 
-    if response.ok:
-        for name, value in response.json().items():
-            yield name, value
-
-    else:
-        raise Exception('Failed to load dictionaries from %s' % url)
-
-
-def save_dictionaries(name, values, db: Database):
     db.get_collection(name).insert_many(values)
 
 
@@ -33,12 +26,11 @@ if __name__ == '__main__':
 
     mc = MongoClient(
         host=dotenv.get_key(dotenv_path, 'db.host'),
-        port=dotenv.get_key(dotenv_path, 'db.port'),
+        port=int(dotenv.get_key(dotenv_path, 'db.port')),
     )
 
     db = mc.get_database(dbname)
 
-    list(
-        map(save_dictionaries, get_dictionaries())
-    )
+    for name, value in get_dictionaries():
+        save_dictionary(name, value, db)
 
