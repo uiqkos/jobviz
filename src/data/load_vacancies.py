@@ -1,18 +1,18 @@
 from datetime import datetime
-from functools import partial
-from operator import itemgetter, iadd
-from typing import Iterator
+from math import ceil
+from multiprocessing.pool import ThreadPool
+from pprint import pprint
+from typing import Iterator, Tuple
 
 import requests
-from src.data.coverage import Coverage
 from dateutil.relativedelta import relativedelta
-
 from mongoengine import connect
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3 import Retry
 
 from src.data.api import get_vacancy, find_vacancies
-from src.env import db_name
+from src.data.coverage import Coverage
+from src.data.utils import DefaultArgumentParser
 from vacancy import Vacancy
 
 
@@ -76,10 +76,16 @@ def find_vacancies_in_date_range(
         for page in range(response.pages):
             for vacancy_dict in find_vacancies(page=page, **params).items:
                 yield get_vacancy(vacancy_dict['id'], requests_session=requests_session, wrap=wrap)
-        cov.save()
+
+    cov.save()
 
 
-def load_and_save_all_vacancies(requests_session: requests.Session = None, verbose=1) -> int:
+def load_and_save_vacancies_in_date_range(
+        date_from: datetime,
+        date_to: datetime = None,
+        requests_session: requests.Session = None,
+        verbose=1
+) -> int:
     """
     Получает и сохраняет все вакансии за последний год
 
@@ -88,8 +94,8 @@ def load_and_save_all_vacancies(requests_session: requests.Session = None, verbo
     requests_session
     verbose: управляет количеством сообщений
         0 - нет сообщений,
-        1 - сообщение о каждой 2000ной записи,
-        2 - сообщение о каждой сохраненной вакансии
+        1 - сообщение о каждой сохраненной вакансии,
+        n - сообщение о каждой n-ой сохраненной вакансии
 
     Returns
     -------
@@ -97,61 +103,115 @@ def load_and_save_all_vacancies(requests_session: requests.Session = None, verbo
     """
     requests_session = requests_session or requests.Session()
 
-    if not hasattr(load_and_save_all_vacancies, 'count'):
-        load_and_save_all_vacancies.count = 0
+    if not hasattr(load_and_save_vacancies_in_date_range, 'count'):
+        load_and_save_vacancies_in_date_range.count = 0
 
     for vacancy in find_vacancies_in_date_range(
-            date_from=datetime.now() - relativedelta(years=1),
-            date_to=datetime.now(),
+            date_from=date_from,
+            date_to=date_to,
             requests_session=requests_session
     ):
         vacancy.save()
 
         if verbose == 1:
-            if load_and_save_all_vacancies.count % 2000 == 0:
-                print('saved: ', load_and_save_all_vacancies.count)
-        elif verbose == 2:
             print(f'Vacancy(id={vacancy.id}, published_at={vacancy.published_at})', end=' ')
-            print(f'----- saved (count: {load_and_save_all_vacancies.count})')
+            print(f'----- saved (count: {load_and_save_vacancies_in_date_range.count})')
 
-        load_and_save_all_vacancies.count += 1
+        elif verbose > 1:
+            if load_and_save_vacancies_in_date_range.count % verbose == 0 and load_and_save_vacancies_in_date_range.count:
+                print('saved: ', load_and_save_vacancies_in_date_range.count)
 
-    return load_and_save_all_vacancies.count
+        load_and_save_vacancies_in_date_range.count += 1
+
+    return load_and_save_vacancies_in_date_range.count
 
 
 if __name__ == '__main__':
-    connect(db_name)
+    parser = DefaultArgumentParser(description='Загружает все вакансии за последний год')
 
-    # Создание сессии и настройка
-    session = requests.Session()
-    retry = Retry(connect=3, backoff_factor=0.5)
-    adapter = HTTPAdapter(max_retries=retry)
+    parser.add_argument(
+        '--proxy-file',
+        default='proxies.txt',
+        help="Файл со строками вида ip:port (default: 'proxies.txt')"
+    )
 
-    session.mount('http://', adapter)
-    session.mount('https://', adapter)
+    parser.add_argument(
+        '--use-proxy',
+        action='store_true',
+        help="Использовать прокси или нет. Необходимо указать '--proxy-file'"
+    )
 
-    # Костыльный счетчик запросов
-    def get(*args, **kwargs):
-        get.counter += 1
-        print('requests:', get.counter)
-        return get.f(*args, **kwargs)
+    parser.add_argument(
+        '--verbose',
+        type=int,
+        default=200,
+        help='Управляет количеством сообщений'
+             '0 - нет сообщений, 1 - сообщение о каждой сохраненной вакансии, '
+             'n - сообщение о каждой n-ой сохраненной вакансии'
+    )
 
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=4,
+        help='Количество потоков'
+    )
 
-    proxy = '23.251.138.105:8080'
+    args = parser.parse_args()
 
-    session.proxies.update(dict(
-        http=proxy,
-        https=proxy,
-        ftp=proxy,
-    ))
+    connect(
+        db=args.db,
+        host=args.db_host,
+        port=args.db_port,
+    )
 
-    # get.f = session.get
-    # get.counter = 0
-    #
-    # session.get = get
+    if args.use_proxy:
+        workers = args.workers
+        pool = ThreadPool(workers)
 
-    # print(session.get('http://icanhazip.com/').text)
-    print(session.get('https://api.hh.ru/vacancies').text)
+        period = relativedelta(years=1)
+        date_from = datetime.now() - period
+        date_to = datetime.now()
+        date_step = (date_to - date_from) / workers
 
-    # print('saved: ', load_and_save_all_vacancies(requests_session=session, verbose=1))
-    # print('requests: ', get.counter)
+        date_ranges = [
+            (date_from + date_step * step, date_from + date_step * (step + 1))
+            for step in range(workers)
+        ]
+
+        with open(args.proxy_file, 'r') as proxy_file:
+            proxies = list(map(str.strip, proxy_file.readlines()))
+
+        def process(tup):
+            proxy, date_range = tup
+
+            session = requests.Session()
+
+            retry = Retry(total=3, backoff_factor=0.5)
+            adapter = HTTPAdapter(max_retries=retry)
+
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+
+            session.proxies['https'] = proxy
+
+            try:
+                load_and_save_vacancies_in_date_range(
+                    date_range[0],
+                    date_range[1],
+                    requests_session=session,
+                    verbose=args.verbose
+                )
+
+            except Exception as e:
+                print(e)
+
+        pprint(list(zip(proxies, date_ranges * ceil(len(proxies) / len(date_ranges)))))
+
+        pool.map(process, zip(proxies, date_ranges * ceil(len(proxies) / len(date_ranges))))
+
+        pool.close()
+        pool.join()
+
+    else:
+        load_and_save_vacancies_in_date_range(verbose=args.verbose)
