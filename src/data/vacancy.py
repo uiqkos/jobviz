@@ -1,13 +1,11 @@
-from datetime import datetime
+from functools import partial
+from typing import List, Tuple, Any
 
-from bson import ObjectId
-from mongoengine import BooleanField, DateTimeField, DynamicDocument, DynamicEmbeddedDocument as MongoDynamicEmbeddedDocument
-from mongoengine import StringField, FloatField, IntField, EmbeddedDocumentField, ListField, ObjectIdField
+import pandas as pd
+from mongoengine import BooleanField, DynamicDocument, DynamicEmbeddedDocument, QuerySet
+from mongoengine import StringField, FloatField, IntField, EmbeddedDocumentField, ListField
 
-
-class DynamicEmbeddedDocument(MongoDynamicEmbeddedDocument):
-    # _id = StringField(unique=True, primary_key=True)
-    meta = {'allow_inheritance': True}
+from src.utils import expand_dict
 
 
 class KeySkill(DynamicEmbeddedDocument):
@@ -40,7 +38,7 @@ class Employment(DynamicEmbeddedDocument):
 
 class Salary(DynamicEmbeddedDocument):
     to: int = IntField(null=True)
-    from_: int = IntField()
+    from_: int = IntField(db_field='from')
     currency: str = StringField()
     gross: bool = BooleanField()
 
@@ -92,9 +90,50 @@ class ProfessorRole(DynamicEmbeddedDocument):
     name: str = StringField()
 
 
+class VacancyQuerySet(QuerySet):
+    def to_dataframe(self, include: List[str] = None, exclude: List[str] = None) -> pd.DataFrame:
+
+        """
+        Создает и возращает датафрейм, содержащий все вакансии из базы
+
+        Parameters
+        ----------
+        include: поля Vacancy, включенные в датафрейм
+        exclude: поля Vacancy, исключенные из датафрейма
+        """
+
+        exclude = exclude or []
+
+        def item_filter(item: Tuple[str, Any]) -> bool:
+            key = item[0]
+            return \
+                (not any([key.startswith(exclude_key + '.') or key == exclude_key for exclude_key in exclude])) \
+                and (
+                    not include or
+                    any([key.startswith(include_key + '.') or key == include_key for include_key in include])
+                )
+
+        def expand_key_skills(vacancy: Vacancy):
+            _vacancy = vacancy
+            _vacancy.key_skills = [key_skill.name for key_skill in vacancy.key_skills]
+            return _vacancy
+
+        return pd.DataFrame(map(dict, map(
+            partial(filter, item_filter),
+            map(
+                dict.items,
+                map(
+                    expand_dict,
+                    map(Vacancy.to_mongo, map(
+                        expand_key_skills, self
+                    ))
+                )
+            )
+        )))
+
+
 class Vacancy(DynamicDocument):
-    _id = StringField(default=ObjectId, primary_key=True)
-    id: int = StringField(unique=True, primary_key=False)
+    id: int = StringField(primary_key=True, db_field='id')
     description: str = StringField()
     key_skills: list[KeySkill] = ListField(EmbeddedDocumentField(KeySkill))
     schedule: Schedule = EmbeddedDocumentField(Schedule)
@@ -132,3 +171,5 @@ class Vacancy(DynamicDocument):
     working_time_modes: list[WorkingTimeMode] = ListField(EmbeddedDocumentField(WorkingTimeMode))
     # accept_temporary
     professional_roles: list[ProfessorRole] = ListField(EmbeddedDocumentField(ProfessorRole))
+
+    meta = {'queryset_class': VacancyQuerySet}
