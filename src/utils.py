@@ -17,7 +17,10 @@ def expand_dict(
 
     Examples
     -------
-        >>> expand_dict({'key1': 'value1', 'key2':{'key3': 'value3', 'key4':{'_key5': 'value5', 'key6': 'value6'}}})
+        >>> expand_dict(
+        ...     {'key1': 'value1', 'key2':{'key3': 'value3', 'key4':{'_key5': 'value5', 'key6': 'value6'}}},
+        ...     ignore_underscore=True
+        ... )
         {'key1': 'value1', 'key2.key3': 'value3', 'key2.key4.key6': 'value6'}
     """
 

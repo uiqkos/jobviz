@@ -9,6 +9,12 @@ db_host = dotenv.get_key(_dotenv_path, 'db.host')
 db_port = int(dotenv.get_key(_dotenv_path, 'db.port'))
 db_name = dotenv.get_key(_dotenv_path, 'db.name')
 
+MAX_DESCRIPTION_WORD_COUNT = 1200
+MAX_NAME_WORD_COUNT = 30
+MAX_SPECIALIZATION_COUNT = 30
+MAX_KEY_SKILL_COUNT = 30
+MAX_PROFESSIONALS_ROLE_COUNT = 30
+DEFAULT_CURRENCY_ID = 6  # RUR
 
 # def get_mongo_client() -> MongoClient:
 #     return MongoClient(

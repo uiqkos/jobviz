@@ -101,7 +101,8 @@ def find_vacancies(
     """
     Parameters
     ----------
-    wrap: преобразовывать ответ в VacanciesResponse или оставтить json (dict)
+    wrap:
+        преобразовывать ответ в VacanciesResponse или оставтить json (dict)
     requests_session
     kwargs
 

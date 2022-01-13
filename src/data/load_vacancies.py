@@ -1,28 +1,26 @@
+import os
+import threading
 from datetime import datetime
-from math import ceil
-from multiprocessing.pool import ThreadPool
-from pprint import pprint
-from typing import Iterator, Tuple
 
 import requests
 from dateutil.relativedelta import relativedelta
 from mongoengine import connect
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3 import Retry
 
 from src.data.api import get_vacancy, find_vacancies
 from src.data.coverage import Coverage
-from src.data.utils import DefaultArgumentParser
-from vacancy import Vacancy
+from src.data.utils import DefaultArgumentParser, CaptchaDodger
 
 
-def find_vacancies_in_date_range(
+def load_and_save_vacancies_in_date_range(
         date_from: datetime,
         date_to: datetime = None,
         wrap=True,
         requests_session=None,
+        verbose: int = 1,
+        workers: int = 1,
+        multithread: bool = False,
         **kwargs
-) -> Iterator[Vacancy]:
+) -> None:
     """
     Функция находит вакансии в диапазоне дат.
     Если найдено (found) > получено (per_page * pages), то
@@ -31,99 +29,151 @@ def find_vacancies_in_date_range(
 
     Parameters
     ----------
-    date_from: дата, которая ограничивает снизу диапазон дат публикации вакансий
-    date_to: дата, которая ограничивает сверху диапазон дат публикации вакансий
-    wrap: преобразовывать ответ в Vacancy или оставтить json (dict)
-    requests_session
-    kwargs: дополнительные параметры api.find_vacancies
+    date_from:
+        дата, которая ограничивает снизу диапазон дат публикации вакансий
+    date_to:
+        дата, которая ограничивает сверху диапазон дат публикации вакансий
+    wrap:
+        преобразовывать ответ в Vacancy или оставтить json (dict)
+    requests_session:
+        сессия, отправляющая запросы
+    verbose:
+        управляет количеством сообщений
+        0 - нет сообщений,
+        1 - сообщение о каждой сохраненной вакансии,
+        n - сообщение о каждой n-ой сохраненной вакансии
+    workers:
+        количество потоков для 1 деления интервала дат
+    kwargs:
+        дополнительные параметры api.find_vacancies
+
     """
+
     requests_session = requests_session or requests.Session()
     date_to = date_to or datetime.now()
+
+    if not hasattr(load_and_save_vacancies_in_date_range, 'saved'):
+        load_and_save_vacancies_in_date_range.saved = 0
 
     cov = Coverage(start=date_from, end=date_to)
 
     if any(map(cov.is_subset, Coverage.objects)):
-        print(f'{date_from} to {date_from} - skip')
+        if verbose:
+            print(f'{date_from} to {date_from} - skip')
         return
 
-    params = dict(
+    find_vacancies_params = dict(
         date_from=date_from.isoformat(),
         date_to=date_to.isoformat(),
         requests_session=requests_session,
         **kwargs
     )
 
-    response = find_vacancies(**params)
-
-    date_middle = date_from + (date_to - date_from) / 2
+    response = find_vacancies(**find_vacancies_params)
 
     if response.per_page * response.pages < response.found \
-            and date_from < date_middle < date_to:
+            and date_from < date_to:
 
-        for vacancy in find_vacancies_in_date_range(
-                date_from, date_middle,
-                wrap=wrap, requests_session=requests_session, **kwargs
-        ):
-            yield vacancy
+        date_step = (date_to - date_from) / workers
 
-        for vacancy in find_vacancies_in_date_range(
-                date_middle, date_to,
-                wrap=wrap, requests_session=requests_session, **kwargs
-        ):
-            yield vacancy
+        date_ranges = [
+            (date_from + date_step * step, date_from + date_step * (step + 1))
+            for step in range(workers)
+        ]
+
+        for date_range in date_ranges:
+            print(date_range)
+            args_ = date_range
+            kwargs_ = dict(
+                verbose=verbose,
+                workers=2, wrap=wrap, multithread=False,
+                requests_session=requests_session, **kwargs
+            )
+
+            if multithread:
+                thread = threading.Thread(
+                    target=load_and_save_vacancies_in_date_range,
+                    args=args_, kwargs=kwargs_
+                )
+
+                thread.start()
+                # thread.join()
+
+            else:
+                load_and_save_vacancies_in_date_range(*args_, **kwargs_)
 
     else:
         for page in range(response.pages):
-            for vacancy_dict in find_vacancies(page=page, **params).items:
-                yield get_vacancy(vacancy_dict['id'], requests_session=requests_session, wrap=wrap)
+            for vacancy_dict in find_vacancies(page=page, **find_vacancies_params).items:
+                vacancy = get_vacancy(vacancy_dict['id'], requests_session=requests_session, wrap=wrap)
+                vacancy.save()
+
+                load_and_save_vacancies_in_date_range.saved += 1
+
+                if verbose == 1:
+                    print(f'Vacancy(id={vacancy.id}, published_at={vacancy.published_at})', end=' ')
+                    print(f'----- saved (count: {load_and_save_vacancies_in_date_range.saved})')
+
+                elif verbose > 1:
+                    if load_and_save_vacancies_in_date_range.saved % verbose == 0:
+                        print('saved: ', load_and_save_vacancies_in_date_range.saved)
 
     cov.save()
 
 
-def load_and_save_vacancies_in_date_range(
-        date_from: datetime,
-        date_to: datetime = None,
-        requests_session: requests.Session = None,
-        verbose=1
-) -> int:
-    """
-    Получает и сохраняет все вакансии за последний год
+def main(db_host, db_port, db, proxy, proxy_file, **kwargs):
+    connect(
+        db=db,
+        host=db_host,
+        port=db_port,
+    )
 
-    Parameters
-    ----------
-    requests_session
-    verbose: управляет количеством сообщений
-        0 - нет сообщений,
-        1 - сообщение о каждой сохраненной вакансии,
-        n - сообщение о каждой n-ой сохраненной вакансии
+    if proxy or proxy_file:
+        if proxy_file != '':
+            with open(proxy_file, 'r') as proxy_file:
+                proxies = list(map(str.strip, proxy_file.readlines()))
 
-    Returns
-    -------
-    Количество сохраненных вакансий
-    """
-    requests_session = requests_session or requests.Session()
+            # load_and_save_vacancies_in_date_range(
+            #     requests_session=CaptchaDodger({'https': proxies}),
+            #     **kwargs
+            # )
 
-    if not hasattr(load_and_save_vacancies_in_date_range, 'count'):
-        load_and_save_vacancies_in_date_range.count = 0
+            if kwargs['terminals']:
 
-    for vacancy in find_vacancies_in_date_range(
-            date_from=date_from,
-            date_to=date_to,
-            requests_session=requests_session
-    ):
-        vacancy.save()
+                date_to, date_from, workers = kwargs['date_to'], kwargs['date_from'], kwargs['workers']
 
-        if verbose == 1:
-            print(f'Vacancy(id={vacancy.id}, published_at={vacancy.published_at})', end=' ')
-            print(f'----- saved (count: {load_and_save_vacancies_in_date_range.count})')
+                date_step = (date_to - date_from) / workers
 
-        elif verbose > 1:
-            if load_and_save_vacancies_in_date_range.count % verbose == 0 and load_and_save_vacancies_in_date_range.count:
-                print('saved: ', load_and_save_vacancies_in_date_range.count)
+                date_ranges = [
+                    (date_from + date_step * step, date_from + date_step * (step + 1))
+                    for step in range(workers)
+                ]
 
-        load_and_save_vacancies_in_date_range.count += 1
+                for proxy, date_range in zip(proxies, date_ranges):
+                    os.system(f"C:\\Users\\uiqko\\projects\\jobviz\\venv\\Scripts\\python.exe -m "
+                              f"src.data.load_vacancies "
+                              f"--proxy-file=C:\\Users\\uiqko\\projects\\jobviz\\proxies.txt "
+                              # f'--proxy={proxy} '
+                              f'--date-from={date_range[0].isoformat()} '
+                              f'--date-to={date_range[1].isoformat()}',
+                              # close_fds=True,
+                              # stdin=None, stdout=None, stderr=None,
+                              # creationflags=subprocess.CREATE_NEW_CONSOLE
+                              )
+            else:
+                load_and_save_vacancies_in_date_range(
+                    requests_session=CaptchaDodger({'https': proxies}),
+                    **kwargs
+                )
 
-    return load_and_save_vacancies_in_date_range.count
+        else:
+            load_and_save_vacancies_in_date_range(
+                requests_session=CaptchaDodger({'https': [proxy]}),
+                **kwargs
+            )
+
+    else:
+        load_and_save_vacancies_in_date_range(**kwargs)
 
 
 if __name__ == '__main__':
@@ -131,14 +181,14 @@ if __name__ == '__main__':
 
     parser.add_argument(
         '--proxy-file',
-        default='proxies.txt',
-        help="Файл со строками вида ip:port (default: 'proxies.txt')"
+        default='',
+        help="Файл со строками вида ip:port"
     )
 
     parser.add_argument(
-        '--use-proxy',
-        action='store_true',
-        help="Использовать прокси или нет. Необходимо указать '--proxy-file'"
+        '--proxy',
+        default='',
+        help="Прокси вида ip:port"
     )
 
     parser.add_argument(
@@ -151,67 +201,39 @@ if __name__ == '__main__':
     )
 
     parser.add_argument(
+        '--date-from',
+        default=(datetime.now() - relativedelta(years=1)).isoformat(),
+        help='Дата, которая ограничивает снизу диапазон дат публикации вакансий'
+    )
+
+    parser.add_argument(
+        '--date-to',
+        default=datetime.now().isoformat(),
+        help='Дата, которая ограничивает сверху диапазон дат публикации вакансий'
+    )
+
+    parser.add_argument(
         '--workers',
         type=int,
         default=4,
         help='Количество потоков'
     )
 
-    args = parser.parse_args()
-
-    connect(
-        db=args.db,
-        host=args.db_host,
-        port=args.db_port,
+    parser.add_argument(
+        '--terminals',
+        action='store_true',
+        help='Запускать скрипт для каждой прокси в отдельном терминале'
     )
 
-    if args.use_proxy:
-        workers = args.workers
-        pool = ThreadPool(workers)
+    args = parser.parse_args()
 
-        period = relativedelta(years=1)
-        date_from = datetime.now() - period
-        date_to = datetime.now()
-        date_step = (date_to - date_from) / workers
-
-        date_ranges = [
-            (date_from + date_step * step, date_from + date_step * (step + 1))
-            for step in range(workers)
-        ]
-
-        with open(args.proxy_file, 'r') as proxy_file:
-            proxies = list(map(str.strip, proxy_file.readlines()))
-
-        def process(tup):
-            proxy, date_range = tup
-
-            session = requests.Session()
-
-            retry = Retry(total=3, backoff_factor=0.5)
-            adapter = HTTPAdapter(max_retries=retry)
-
-            session.mount('http://', adapter)
-            session.mount('https://', adapter)
-
-            session.proxies['https'] = proxy
-
-            try:
-                load_and_save_vacancies_in_date_range(
-                    date_range[0],
-                    date_range[1],
-                    requests_session=session,
-                    verbose=args.verbose
-                )
-
-            except Exception as e:
-                print(e)
-
-        pprint(list(zip(proxies, date_ranges * ceil(len(proxies) / len(date_ranges)))))
-
-        pool.map(process, zip(proxies, date_ranges * ceil(len(proxies) / len(date_ranges))))
-
-        pool.close()
-        pool.join()
-
-    else:
-        load_and_save_vacancies_in_date_range(verbose=args.verbose)
+    main(db_host=args.db_host,
+         db_port=args.db_port,
+         db=args.db,
+         date_from=datetime.fromisoformat(args.date_from),
+         date_to=datetime.fromisoformat(args.date_to),
+         verbose=args.verbose,
+         workers=args.workers,
+         proxy=args.proxy,
+         terminals=args.terminals,
+         proxy_file=args.proxy_file)
