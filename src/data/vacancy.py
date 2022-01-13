@@ -2,7 +2,7 @@ from functools import partial
 from typing import List, Tuple, Any
 
 import pandas as pd
-from mongoengine import BooleanField, DynamicDocument, DynamicEmbeddedDocument, QuerySet
+from mongoengine import BooleanField, DynamicDocument, DynamicEmbeddedDocument, QuerySet, Document, EmbeddedDocument
 from mongoengine import StringField, FloatField, IntField, EmbeddedDocumentField, ListField
 
 from src.utils import expand_dict
@@ -90,6 +90,36 @@ class ProfessorRole(DynamicEmbeddedDocument):
     name: str = StringField()
 
 
+class ProcessedVacancy(EmbeddedDocument):
+    experience_real_id: int = IntField()
+    schedule_real_id: int = IntField()
+    area_id: int = IntField()
+    employer_id: int = IntField()
+    specializations: List[int] = ListField(IntField())
+    professional_roles: List[int] = ListField(IntField())
+    key_skills: List[int] = ListField(IntField())
+    salary: List[int] = ListField(IntField())
+    address: List[int] = ListField(IntField())
+    name: List[int] = ListField(IntField())
+    description: List[int] = ListField(IntField())
+
+    @property
+    def vector(self) -> List[int]:
+        return [
+            self.experience_real_id,
+            self.schedule_real_id,
+            self.area_id,
+            self.employer_id,
+            *self.specializations,
+            *self.professional_roles,
+            *self.key_skills,
+            *self.salary,
+            *self.address,
+            *self.description,
+            *self.name,
+        ]
+
+
 class VacancyQuerySet(QuerySet):
     def to_dataframe(self, include: List[str] = None, exclude: List[str] = None) -> pd.DataFrame:
 
@@ -171,5 +201,7 @@ class Vacancy(DynamicDocument):
     working_time_modes: list[WorkingTimeMode] = ListField(EmbeddedDocumentField(WorkingTimeMode))
     # accept_temporary
     professional_roles: list[ProfessorRole] = ListField(EmbeddedDocumentField(ProfessorRole))
+
+    processed: ProcessedVacancy = EmbeddedDocumentField(ProcessedVacancy, null=True, required=False)
 
     meta = {'queryset_class': VacancyQuerySet}
