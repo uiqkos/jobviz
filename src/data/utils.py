@@ -11,29 +11,6 @@ from urllib3.exceptions import ConnectTimeoutError
 from src import settings
 
 
-class DefaultArgumentParser(argparse.ArgumentParser):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        self.add_argument(
-            '--db',
-            default=settings.db_name,
-            help='Имя бд (если не указано, берется из .env)'
-        )
-
-        self.add_argument(
-            '--db-host',
-            default=settings.db_host,
-            help='Хост подключения к mongodb (если не указано, берется из .env)'
-        )
-
-        self.add_argument(
-            '--db-port',
-            default=settings.db_port,
-            help='Порт подключения к mongodb (если не указано, берется из .env)'
-        )
-
-
 class CaptchaDodger(requests.Session):
     def __init__(self, proxies: Dict[str, List] = None, verbose=True):
         super().__init__()
@@ -53,7 +30,6 @@ class CaptchaDodger(requests.Session):
         self.update_proxy('https')
 
     def update_proxy(self, protocol) -> bool:
-
         if self.proxy_dict[protocol]:
             self.proxies[protocol] = self.proxy_dict[protocol].pop(0)
 

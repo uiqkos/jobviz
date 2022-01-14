@@ -55,7 +55,7 @@ class Employer(DynamicEmbeddedDocument):
     url: str = StringField()
     alternate_url: str = StringField()
     trusted: bool = BooleanField()
-    blacklisted: bool = BooleanField()
+    blackListed: bool = BooleanField()
 
 
 class Type(DynamicEmbeddedDocument):
@@ -122,14 +122,15 @@ class ProcessedVacancy(EmbeddedDocument):
 
 class VacancyQuerySet(QuerySet):
     def to_dataframe(self, include: List[str] = None, exclude: List[str] = None) -> pd.DataFrame:
-
         """
-        Создает и возращает датафрейм, содержащий все вакансии из базы
+        Создает и возращает датафрейм вакансий
 
         Parameters
         ----------
-        include: поля Vacancy, включенные в датафрейм
-        exclude: поля Vacancy, исключенные из датафрейма
+            include:
+                поля Vacancy, включенные в датафрейм
+            exclude:
+                поля Vacancy, исключенные из датафрейма
         """
 
         exclude = exclude or []
@@ -165,7 +166,7 @@ class VacancyQuerySet(QuerySet):
 class Vacancy(DynamicDocument):
     id: int = StringField(primary_key=True, db_field='id')
     description: str = StringField()
-    key_skills: list[KeySkill] = ListField(EmbeddedDocumentField(KeySkill))
+    key_skills: List[KeySkill] = ListField(EmbeddedDocumentField(KeySkill))
     schedule: Schedule = EmbeddedDocumentField(Schedule)
     # accept_handicapped
     # accept_kids
@@ -189,18 +190,18 @@ class Vacancy(DynamicDocument):
     # has_test
     # response_url
     # test
-    specializations: list[Specialization] = ListField(EmbeddedDocumentField(Specialization))
+    specializations: List[Specialization] = ListField(EmbeddedDocumentField(Specialization))
     # contacts
     # billing_type
     # allow_messages
     # premium
     # driver_license_types
     # accept_incomplete_resumes
-    working_days: list[WorkingDay] = ListField(EmbeddedDocumentField(WorkingDay))
-    working_time_intervals: list[WorkingTimeInterval] = ListField(EmbeddedDocumentField(WorkingTimeInterval))
-    working_time_modes: list[WorkingTimeMode] = ListField(EmbeddedDocumentField(WorkingTimeMode))
+    working_days: List[WorkingDay] = ListField(EmbeddedDocumentField(WorkingDay))
+    working_time_intervals: List[WorkingTimeInterval] = ListField(EmbeddedDocumentField(WorkingTimeInterval))
+    working_time_modes: List[WorkingTimeMode] = ListField(EmbeddedDocumentField(WorkingTimeMode))
     # accept_temporary
-    professional_roles: list[ProfessorRole] = ListField(EmbeddedDocumentField(ProfessorRole))
+    professional_roles: List[ProfessorRole] = ListField(EmbeddedDocumentField(ProfessorRole))
 
     processed: ProcessedVacancy = EmbeddedDocumentField(ProcessedVacancy, null=True, required=False)
 

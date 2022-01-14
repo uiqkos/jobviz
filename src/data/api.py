@@ -17,15 +17,23 @@ def find_dictionaries(
     """Поочередно возращает название и содержимое словарей данных"""
     requests_session = requests_session or requests.Session()
 
-    url = BASE_URL + 'dictionaries'
-    response = requests_session.get(url, **kwargs)
+    response = requests_session.get(BASE_URL + 'dictionaries', **kwargs)
 
     if response.ok:
         for name, value in response.json().items():
             yield name, value
 
     else:
-        raise Exception(f'Failed to load dictionaries from {response.url} Error: {response.text}')
+        raise Exception(f'Failed to get dictionaries from {response.url} Error: {response.text}')
+
+    # professional_roles
+    response = requests_session.get(BASE_URL + 'professional_roles', **kwargs)
+
+    if response.ok:
+        yield 'professional_roles', response.json()['categories']
+
+    else:
+        raise Exception(f'Failed to get professional_roles from {response.url} Error: {response.text}')
 
 
 def get_vacancy(
@@ -37,10 +45,14 @@ def get_vacancy(
     """
     Parameters
     ----------
-    vacancy_id: id вакансии
-    wrap: преобразовывать ответ в Vacancy или оставтить json (dict)
-    requests_session
-    kwargs
+    vacancy_id:
+        id вакансии
+    wrap:
+        преобразовывать ответ в Vacancy или оставтить json (dict)
+    requests_session:
+        сессия, отправляющая запросы
+    kwargs:
+        Дополнительные параметры get запроса
 
     Returns
     -------
@@ -72,6 +84,8 @@ class VacanciesResponse:
 
 
 class DynamicVacanciesResponse(VacanciesResponse):
+    """При инстанцировании поля, не входящие в VacanciesResponse, записываются в поле _extra, но обращение к ним
+    происходит через __getattr__ """
     def __init__(self, **kwargs):
         self_fields = list(map(attrgetter('name'), fields(VacanciesResponse)))
 
@@ -103,8 +117,10 @@ def find_vacancies(
     ----------
     wrap:
         преобразовывать ответ в VacanciesResponse или оставтить json (dict)
-    requests_session
-    kwargs
+    requests_session:
+        сессия, отправляющая запросы
+    kwargs:
+        дополнительные параметры get запроса
 
     Returns
     -------

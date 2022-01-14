@@ -1,6 +1,8 @@
 import os
+import subprocess
 import threading
 from datetime import datetime
+from typing import Iterator
 
 import requests
 from dateutil.relativedelta import relativedelta
@@ -8,19 +10,20 @@ from mongoengine import connect
 
 from src.data.api import get_vacancy, find_vacancies
 from src.data.coverage import Coverage
-from src.data.utils import DefaultArgumentParser, CaptchaDodger
+from src.data.vacancy import Vacancy
+from src.utils import DefaultArgumentParser
+from src.data.utils import CaptchaDodger
 
 
-def load_and_save_vacancies_in_date_range(
+def find_vacancies_in_date_range(
         date_from: datetime,
         date_to: datetime = None,
-        wrap=True,
-        requests_session=None,
+        wrap: bool = True,
+        requests_session: requests.Session = None,
         verbose: int = 1,
-        workers: int = 1,
-        multithread: bool = False,
+        intervals: int = 2,
         **kwargs
-) -> None:
+) -> Iterator[Vacancy]:
     """
     Функция находит вакансии в диапазоне дат.
     Если найдено (found) > получено (per_page * pages), то
@@ -42,8 +45,8 @@ def load_and_save_vacancies_in_date_range(
         0 - нет сообщений,
         1 - сообщение о каждой сохраненной вакансии,
         n - сообщение о каждой n-ой сохраненной вакансии
-    workers:
-        количество потоков для 1 деления интервала дат
+    intervals:
+        количество промежутков, на которые разделяется интервал дат
     kwargs:
         дополнительные параметры api.find_vacancies
 
@@ -51,9 +54,6 @@ def load_and_save_vacancies_in_date_range(
 
     requests_session = requests_session or requests.Session()
     date_to = date_to or datetime.now()
-
-    if not hasattr(load_and_save_vacancies_in_date_range, 'saved'):
-        load_and_save_vacancies_in_date_range.saved = 0
 
     cov = Coverage(start=date_from, end=date_to)
 
@@ -74,74 +74,58 @@ def load_and_save_vacancies_in_date_range(
     if response.per_page * response.pages < response.found \
             and date_from < date_to:
 
-        date_step = (date_to - date_from) / workers
+        date_step = (date_to - date_from) / intervals
 
         date_ranges = [
             (date_from + date_step * step, date_from + date_step * (step + 1))
-            for step in range(workers)
+            for step in range(intervals)
         ]
 
         for date_range in date_ranges:
-            print(date_range)
-            args_ = date_range
-            kwargs_ = dict(
-                verbose=verbose,
-                workers=2, wrap=wrap, multithread=False,
-                requests_session=requests_session, **kwargs
-            )
-
-            if multithread:
-                thread = threading.Thread(
-                    target=load_and_save_vacancies_in_date_range,
-                    args=args_, kwargs=kwargs_
-                )
-
-                thread.start()
-                # thread.join()
-
-            else:
-                load_and_save_vacancies_in_date_range(*args_, **kwargs_)
+            for vacancy in find_vacancies_in_date_range(
+                    *date_range,
+                    wrap=wrap,
+                    requests_session=requests_session,
+                    verbose=verbose,
+                    intervals=2,
+                    **kwargs
+            ):
+                yield vacancy
 
     else:
         for page in range(response.pages):
             for vacancy_dict in find_vacancies(page=page, **find_vacancies_params).items:
-                vacancy = get_vacancy(vacancy_dict['id'], requests_session=requests_session, wrap=wrap)
-                vacancy.save()
-
-                load_and_save_vacancies_in_date_range.saved += 1
-
-                if verbose == 1:
-                    print(f'Vacancy(id={vacancy.id}, published_at={vacancy.published_at})', end=' ')
-                    print(f'----- saved (count: {load_and_save_vacancies_in_date_range.saved})')
-
-                elif verbose > 1:
-                    if load_and_save_vacancies_in_date_range.saved % verbose == 0:
-                        print('saved: ', load_and_save_vacancies_in_date_range.saved)
+                yield get_vacancy(vacancy_dict['id'], requests_session=requests_session, wrap=wrap)
 
     cov.save()
 
 
-def main(db_host, db_port, db, proxy, proxy_file, **kwargs):
-    connect(
-        db=db,
-        host=db_host,
-        port=db_port,
-    )
+def load_vacancies(
+        db_host: str,
+        db_port: str,
+        db: str,
+        date_from: datetime,
+        date_to: datetime,
+        proxy: str = '',
+        proxy_file: str = '',
+        verbose: int = 200,
+        terminals: bool = False,
+        workers: int = 4
+) -> None:
+    """Получает и сохраняет все вакансии в диапазоне дат"""
+    connect(db=db, host=db_host, port=db_port)
+
+    kwargs = dict(date_from=date_from, date_to=date_to, verbose=verbose, intervals=workers)
+
+    if not hasattr(load_vacancies, 'saved'):
+        load_vacancies.saved = 0
 
     if proxy or proxy_file:
         if proxy_file != '':
             with open(proxy_file, 'r') as proxy_file:
                 proxies = list(map(str.strip, proxy_file.readlines()))
 
-            # load_and_save_vacancies_in_date_range(
-            #     requests_session=CaptchaDodger({'https': proxies}),
-            #     **kwargs
-            # )
-
-            if kwargs['terminals']:
-
-                date_to, date_from, workers = kwargs['date_to'], kwargs['date_from'], kwargs['workers']
-
+            if terminals:
                 date_step = (date_to - date_from) / workers
 
                 date_ranges = [
@@ -150,30 +134,34 @@ def main(db_host, db_port, db, proxy, proxy_file, **kwargs):
                 ]
 
                 for proxy, date_range in zip(proxies, date_ranges):
-                    os.system(f"C:\\Users\\uiqko\\projects\\jobviz\\venv\\Scripts\\python.exe -m "
-                              f"src.data.load_vacancies "
-                              f"--proxy-file=C:\\Users\\uiqko\\projects\\jobviz\\proxies.txt "
-                              # f'--proxy={proxy} '
-                              f'--date-from={date_range[0].isoformat()} '
-                              f'--date-to={date_range[1].isoformat()}',
-                              # close_fds=True,
-                              # stdin=None, stdout=None, stderr=None,
-                              # creationflags=subprocess.CREATE_NEW_CONSOLE
-                              )
+                    subprocess.call(f"C:\\Users\\uiqko\\projects\\jobviz\\venv\\Scripts\\python.exe -m "
+                                    f"src.data.load_vacancies "
+                                    f"--proxy-file=C:\\Users\\uiqko\\projects\\jobviz\\proxies.txt "
+                                    f'--verbose={verbose} '
+                                    f'--date-from={date_range[0].isoformat()} '
+                                    f'--date-to={date_range[1].isoformat()}',
+                                    close_fds=True, )
+                return
+
             else:
-                load_and_save_vacancies_in_date_range(
-                    requests_session=CaptchaDodger({'https': proxies}),
-                    **kwargs
-                )
+                requests_session = CaptchaDodger({'https': proxies})
 
         else:
-            load_and_save_vacancies_in_date_range(
-                requests_session=CaptchaDodger({'https': [proxy]}),
-                **kwargs
-            )
+            requests_session = CaptchaDodger({'https': [proxy]})
 
-    else:
-        load_and_save_vacancies_in_date_range(**kwargs)
+        kwargs['requests_session'] = requests_session
+
+    for vacancy in find_vacancies_in_date_range(**kwargs):
+        vacancy.save()
+        load_vacancies.saved += 1
+
+        if verbose == 1:
+            print(f'Vacancy(id={vacancy.id}, published_at={vacancy.published_at})', end=' ')
+            print(f'----- saved (count: {load_vacancies.saved})')
+
+        elif verbose > 1:
+            if load_vacancies.saved % verbose == 0:
+                print('saved: ', load_vacancies.saved)
 
 
 if __name__ == '__main__':
@@ -227,13 +215,15 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    main(db_host=args.db_host,
-         db_port=args.db_port,
-         db=args.db,
-         date_from=datetime.fromisoformat(args.date_from),
-         date_to=datetime.fromisoformat(args.date_to),
-         verbose=args.verbose,
-         workers=args.workers,
-         proxy=args.proxy,
-         terminals=args.terminals,
-         proxy_file=args.proxy_file)
+    load_vacancies(
+        db_host=args.db_host,
+        db_port=args.db_port,
+        db=args.db,
+        proxy=args.proxy,
+        proxy_file=args.proxy_file,
+        date_from=datetime.fromisoformat(args.date_from),
+        date_to=datetime.fromisoformat(args.date_to),
+        verbose=args.verbose,
+        terminals=args.terminals,
+        workers=args.workers
+    )

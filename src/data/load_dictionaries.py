@@ -3,9 +3,8 @@ from typing import Any
 from pymongo import MongoClient
 from pymongo.database import Database
 
-from src import settings
 from src.data.api import find_dictionaries
-from src.data.utils import DefaultArgumentParser
+from src.utils import DefaultArgumentParser
 
 
 def save_dictionary(
@@ -28,6 +27,27 @@ def save_dictionary(
         db.get_collection(collection_name).insert_many(values)
 
 
+def load_dictionaries(
+        db_host: str,
+        db_port: str,
+        db: str,
+        update: bool = False,
+        add_real_id: bool = False
+):
+    """Сохраняет все словари данных в бд"""
+    for name, value in find_dictionaries():
+        save_dictionary(
+            collection_name=name,
+            values=value,
+            db=MongoClient(
+                host=db_host,
+                port=db_port
+            ).get_database(db),
+            drop_if_exists=not update,
+            add_real_id=add_real_id
+        )
+
+
 if __name__ == '__main__':
     parser = DefaultArgumentParser(
         description='Загружает и сохраняет все словари данных (https://api.hh.ru/dictionaries)'
@@ -47,15 +67,11 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    for name, value in find_dictionaries():
-        save_dictionary(
-            collection_name=name,
-            values=value,
-            db=MongoClient(
-                host=args.db_host,
-                port=args.db_port
-            ).get_database(args.db),
-            drop_if_exists=not args.update,
-            add_real_id=args.add_real_id
-        )
+    load_dictionaries(
+        db_host=args.db_host,
+        db_port=args.db_port,
+        db=args.db,
+        update=args.update,
+        add_real_id=args.add_real_id
+    )
 
