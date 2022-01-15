@@ -149,6 +149,15 @@ class VacancyQuerySet(QuerySet):
             _vacancy.key_skills = [key_skill.name for key_skill in vacancy.key_skills]
             return _vacancy
 
+        def process_vacancy(vacancy: Vacancy) -> dict:
+            _vacancy = vacancy
+            _vacancy.key_skills = [key_skill.name for key_skill in vacancy.key_skills]
+
+            vacancy_dict = expand_dict(_vacancy.to_mongo())
+
+            # for key in vacancy_dict:
+            #     if key in exclude or any(map(key.startswith, exclude))
+
         return pd.DataFrame(map(dict, map(
             partial(filter, item_filter),
             map(

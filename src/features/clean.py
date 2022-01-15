@@ -3,7 +3,7 @@ import re
 
 from mongoengine import connect
 
-from src.data.utils import DefaultArgumentParser
+from src.utils import DefaultArgumentParser
 from src.data.vacancy import Vacancy
 
 

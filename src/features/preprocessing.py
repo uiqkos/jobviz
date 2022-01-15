@@ -1,15 +1,13 @@
-from functools import partial
 from operator import attrgetter
 from typing import List
 
 from mongoengine import connect
 from pymongo import MongoClient
 from pymongo.database import Database
-from spacy import load
 from spacy.tokens import Doc
 
-from src.data.utils import DefaultArgumentParser
 from src.data.vacancy import Vacancy, ProcessedVacancy
+from src.embeddings import orth_to_idx, nlp
 from src.settings import (
     MAX_DESCRIPTION_WORD_COUNT,
     MAX_NAME_WORD_COUNT,
@@ -18,20 +16,20 @@ from src.settings import (
     MAX_PROFESSIONALS_ROLE_COUNT,
     DEFAULT_CURRENCY_ID
 )
-
-nlp = load('ru_core_news_md')
+from src.utils import DefaultArgumentParser
 
 
 def tokenize(doc: Doc, remove_punct: bool = True, remove_stop: bool = True) -> List[int]:
     return [
-        tok.orth
+        orth_to_idx[tok.orth]
         for tok in doc
         if not tok.is_stop or not remove_stop
         if not tok.is_punct or not remove_punct
+        if tok.orth in orth_to_idx
     ]
 
 
-def pad(seq, pad_len) -> List[int]:
+def pad(seq, pad_len=None) -> List[int]:
     return seq[:pad_len] + [0] * (pad_len - len(seq))
 
 
@@ -45,13 +43,23 @@ def process_vacancy(vacancy: Vacancy, db: Database) -> ProcessedVacancy:
     experience_real_id = id_to_real('experience', vacancy.experience.id, db)
     schedule_real_id = id_to_real('schedule', vacancy.schedule.id, db)
 
-    salary = (
-        vacancy.salary.from_,
-        vacancy.salary.to,
-        id_to_real('currency', vacancy.salary.currency, db, id_field='code')
-    ) if vacancy.salary else (0, 0, DEFAULT_CURRENCY_ID)
+    if vacancy.salary:
+        salary_from = vacancy.salary.from_ or 0
+        salary_to = vacancy.salary.to or salary_from
 
-    address = (vacancy.address.lat, vacancy.address.lng) if vacancy.address else (0, 0)
+        salary = (
+            salary_from,
+            salary_to,
+            id_to_real('currency', vacancy.salary.currency, db, id_field='code')
+        )
+
+    else:
+        salary = (0, 0, DEFAULT_CURRENCY_ID)
+
+    address = (
+        vacancy.address.lat,
+        vacancy.address.lng
+    ) if vacancy.address and vacancy.address.lat and vacancy.address.lng else (0, 0)
 
     specializations = pad(
         list(map(float, map(attrgetter('id'), vacancy.specializations))),
@@ -75,32 +83,43 @@ def process_vacancy(vacancy: Vacancy, db: Database) -> ProcessedVacancy:
         schedule_real_id=schedule_real_id,
         salary=salary,
         address=address,
-        area_id=int(vacancy.area.id),
-        employer_id=int(vacancy.employer.id),
+        area_id=int(vacancy.area.id or 0),
+        employer_id=int(vacancy.employer.id or 0),
         specializations=specializations,
         professional_roles=professional_roles,
         key_skills=key_skills,
     )
 
 
+def process_all_vacancies(db_host, db_port, db) -> None:
+    mc = MongoClient(
+        host=db_host,
+        port=db_port,
+    )
+
+    connect(
+        host=db_host,
+        port=db_port,
+        db=db
+    )
+
+    db = mc.get_database(db)
+
+    for i, vacancy in enumerate(Vacancy.objects.limit(10_000)):
+        processed = process_vacancy(vacancy, db)
+        vacancy.processed = processed
+        print(vacancy.id)
+        vacancy.save()
+
+
 if __name__ == '__main__':
     parser = DefaultArgumentParser()
     args = parser.parse_args()
 
-    mc = MongoClient(
-        host=args.db_host,
-        port=args.db_port,
-    )
+    process_all_vacancies(args.db_host, args.db_port, args.db)
 
-    connect(
-        host=args.db_host,
-        port=args.db_port,
-        db=args.db
-    )
 
-    db = mc.get_database(args.db)
-
-    print(list(map(len, map(
-        attrgetter('vector'),
-        map(partial(process_vacancy, db=db), Vacancy.objects().limit(10))
-    ))))
+    # print(list(map(len, map(
+    #     attrgetter('vector'),
+    #     map(partial(process_vacancy, db=db), Vacancy.objects().limit(10))
+    # ))))
