@@ -51,10 +51,15 @@ def convert_salary(
         from_currency: str,
         db: Database,
         to_currency: str = 'RUR'):
-    if from_currency != 'RUR':
-        print(from_currency)
-    from_rate = db.get_collection('currency').find_one({'code': from_currency})['rate']
-    to_rate = db.get_collection('currency').find_one({'code': to_currency})['rate']
+
+    if not hasattr(convert_salary, '_currency_collection'):
+        convert_salary.rate_by_code = {
+            currency['code']: currency['rate']
+            for currency in db.get_collection('currency').find()
+        }
+
+    from_rate = convert_salary.rate_by_code[from_currency]
+    to_rate = convert_salary.rate_by_code[to_currency]
     in_rur = salary / from_rate
     return in_rur * to_rate
 
