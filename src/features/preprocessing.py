@@ -1,125 +1,67 @@
-from operator import attrgetter
-from typing import List
+import re
+from dataclasses import dataclass
+from typing import Dict, List, Union
 
-from mongoengine import connect
-from pymongo import MongoClient
+import numpy as np
+import spacy
+import tensorflow as tf
 from pymongo.database import Database
-from spacy.tokens import Doc
+from tensorflow.keras.layers.experimental.preprocessing import TextVectorization
+from tensorflow.keras.layers import Embedding
+from tensorflow.keras.initializers import Constant
 
-from src.data.vacancy import Vacancy, ProcessedVacancy
-from src.embeddings import orth_to_idx, nlp
-from src.settings import (
-    MAX_DESCRIPTION_WORD_COUNT,
-    MAX_NAME_WORD_COUNT,
-    MAX_KEY_SKILL_COUNT,
-    MAX_SPECIALIZATION_COUNT,
-    MAX_PROFESSIONALS_ROLE_COUNT,
-    DEFAULT_CURRENCY_ID
-)
-from src.utils import DefaultArgumentParser
+from src import settings
+from src.features.clean import remove_html
 
-
-def tokenize(doc: Doc, remove_punct: bool = True, remove_stop: bool = True) -> List[int]:
-    return [
-        orth_to_idx[tok.orth]
-        for tok in doc
-        if not tok.is_stop or not remove_stop
-        if not tok.is_punct or not remove_punct
-        if tok.orth in orth_to_idx
-    ]
+nlp = spacy.load('ru_core_news_md')
+embedding_matrix: np.ndarray = np.array([nlp.vocab.vectors[orth] for orth in nlp.vocab.vectors])
+strings: List[str] = [nlp.vocab.strings[orth] for orth in nlp.vocab.vectors]
+orth_to_idx: Dict[int, int] = dict(map(tuple, map(reversed, enumerate(nlp.vocab.vectors))))
+_stop_words_regex = ' ' + ' | '.join(nlp.Defaults.stop_words) + ' '
 
 
-def pad(seq, pad_len=None) -> List[int]:
-    return seq[:pad_len] + [0] * (pad_len - len(seq))
+def standardize_text(input_string):
+    lower = tf.strings.lower(input_string, encoding='utf-8')
+    no_html = tf.strings.regex_replace(lower, r'<.*?>', '')
+    no_numbers = tf.strings.regex_replace(no_html, r'\d+', '')
+    no_stop_words = tf.strings.regex_replace(' ' + no_numbers + ' ', _stop_words_regex, ' ')
+
+    return no_stop_words
 
 
-def id_to_real(name, value, db: Database, id_field='id'):
-    return db.get_collection(name).find_one({id_field: value})['real_id']
-
-
-def process_vacancy(vacancy: Vacancy, db: Database) -> ProcessedVacancy:
-    description = pad(tokenize(nlp(vacancy.description)), pad_len=MAX_DESCRIPTION_WORD_COUNT)
-    name = pad(tokenize(nlp(vacancy.name)), pad_len=MAX_NAME_WORD_COUNT)
-    experience_real_id = id_to_real('experience', vacancy.experience.id, db)
-    schedule_real_id = id_to_real('schedule', vacancy.schedule.id, db)
-
-    if vacancy.salary:
-        salary_from = vacancy.salary.from_ or 0
-        salary_to = vacancy.salary.to or salary_from
-
-        salary = (
-            salary_from,
-            salary_to,
-            id_to_real('currency', vacancy.salary.currency, db, id_field='code')
-        )
-
-    else:
-        salary = (0, 0, DEFAULT_CURRENCY_ID)
-
-    address = (
-        vacancy.address.lat,
-        vacancy.address.lng
-    ) if vacancy.address and vacancy.address.lat and vacancy.address.lng else (0, 0)
-
-    specializations = pad(
-        list(map(float, map(attrgetter('id'), vacancy.specializations))),
-        pad_len=MAX_SPECIALIZATION_COUNT
-    )
-
-    professional_roles = pad(
-        list(map(int, map(attrgetter('id'), vacancy.professional_roles))),
-        pad_len=MAX_PROFESSIONALS_ROLE_COUNT
-    )
-
-    key_skills = pad(
-        list(),
-        pad_len=MAX_KEY_SKILL_COUNT
-    )  # todo
-
-    return ProcessedVacancy(
-        name=name,
-        description=description,
-        experience_real_id=experience_real_id,
-        schedule_real_id=schedule_real_id,
-        salary=salary,
-        address=address,
-        area_id=int(vacancy.area.id or 0),
-        employer_id=int(vacancy.employer.id or 0),
-        specializations=specializations,
-        professional_roles=professional_roles,
-        key_skills=key_skills,
+def get_text_vectorization():
+    return TextVectorization(
+        output_sequence_length=200,
+        standardize=standardize_text,
+        vocabulary=strings,
     )
 
 
-def process_all_vacancies(db_host, db_port, db) -> None:
-    mc = MongoClient(
-        host=db_host,
-        port=db_port,
+def get_embedding():
+    return Embedding(
+        input_dim=embedding_matrix.shape[0],
+        output_dim=embedding_matrix.shape[1],
+        embeddings_initializer=Constant(embedding_matrix),
+        trainable=False
     )
 
-    connect(
-        host=db_host,
-        port=db_port,
-        db=db
-    )
 
-    db = mc.get_database(db)
-
-    for i, vacancy in enumerate(Vacancy.objects.limit(10_000)):
-        processed = process_vacancy(vacancy, db)
-        vacancy.processed = processed
-        print(vacancy.id)
-        vacancy.save()
-
-
-if __name__ == '__main__':
-    parser = DefaultArgumentParser()
-    args = parser.parse_args()
-
-    process_all_vacancies(args.db_host, args.db_port, args.db)
+def convert_salary(
+        salary: Union[float, int],
+        from_currency: str,
+        db: Database,
+        to_currency: str = 'RUR'):
+    if from_currency != 'RUR':
+        print(from_currency)
+    from_rate = db.get_collection('currency').find_one({'code': from_currency})['rate']
+    to_rate = db.get_collection('currency').find_one({'code': to_currency})['rate']
+    in_rur = salary / from_rate
+    return in_rur * to_rate
 
 
-    # print(list(map(len, map(
-    #     attrgetter('vector'),
-    #     map(partial(process_vacancy, db=db), Vacancy.objects().limit(10))
-    # ))))
+def vectorize_key_skills(key_skills: List[str], db: Database = settings.db) -> List[int]:
+    vec = []
+    for key_skill in key_skills:
+        vec.append(db.get_collection('key_skills').find_one({'name': key_skill}))
+
+    return vec
