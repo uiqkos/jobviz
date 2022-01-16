@@ -1,3 +1,4 @@
+from copy import copy
 from functools import partial
 from typing import List, Tuple, Any
 
@@ -135,41 +136,21 @@ class VacancyQuerySet(QuerySet):
 
         exclude = exclude or []
 
-        def item_filter(item: Tuple[str, Any]) -> bool:
-            key = item[0]
-            return \
-                (not any([key.startswith(exclude_key + '.') or key == exclude_key for exclude_key in exclude])) \
-                and (
-                    not include or
-                    any([key.startswith(include_key + '.') or key == include_key for include_key in include])
-                )
-
-        def expand_key_skills(vacancy: Vacancy):
-            _vacancy = vacancy
-            _vacancy.key_skills = [key_skill.name for key_skill in vacancy.key_skills]
-            return _vacancy
-
         def process_vacancy(vacancy: Vacancy) -> dict:
             _vacancy = vacancy
             _vacancy.key_skills = [key_skill.name for key_skill in vacancy.key_skills]
 
             vacancy_dict = expand_dict(_vacancy.to_mongo())
 
-            # for key in vacancy_dict:
-            #     if key in exclude or any(map(key.startswith, exclude))
+            include_ = include or vacancy_dict.keys()
 
-        return pd.DataFrame(map(dict, map(
-            partial(filter, item_filter),
-            map(
-                dict.items,
-                map(
-                    expand_dict,
-                    map(Vacancy.to_mongo, map(
-                        expand_key_skills, self
-                    ))
-                )
-            )
-        )))
+            for key in list(vacancy_dict.keys()):
+                if (key not in include_ and not any(map(key.startswith, include_))) or key in exclude or any(map(key.startswith, exclude)):
+                    vacancy_dict.pop(key)
+
+            return vacancy_dict
+
+        return pd.DataFrame(map(process_vacancy, Vacancy.objects))
 
 
 class Vacancy(DynamicDocument):

@@ -1,14 +1,9 @@
-import argparse
 import re
-from typing import Dict, List, Optional, Union
+from typing import Dict, List
 
 import requests
-from requests import ConnectTimeout
 from requests.adapters import HTTPAdapter
-from urllib3 import Retry
-from urllib3.exceptions import ConnectTimeoutError
-
-from src import settings
+from requests.packages.urllib3 import Retry
 
 
 class CaptchaDodger(requests.Session):
