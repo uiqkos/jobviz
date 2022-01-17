@@ -44,19 +44,19 @@ class DefaultArgumentParser(argparse.ArgumentParser):
 
         self.add_argument(
             '--db',
-            default=settings.db_name,
+            default=settings.DB_NAME,
             help='Имя бд (если не указано, берется из .env)'
         )
 
         self.add_argument(
             '--db-host',
-            default=settings.db_host,
+            default=settings.DB_HOST,
             help='Хост подключения к mongodb (если не указано, берется из .env)'
         )
 
         self.add_argument(
             '--db-port',
-            default=settings.db_port,
+            default=settings.DB_PORT,
             help='Порт подключения к mongodb (если не указано, берется из .env)'
         )
 

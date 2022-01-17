@@ -48,7 +48,7 @@ if __name__ == '__main__':
     db = MongoClient(
         host=args.db_host,
         port=args.db_port,
-    ).get_database(settings.db_name)
+    ).get_database(settings.DB_NAME)
 
     # for vacancy in Vacancy.objects()[10_000:11_000]:
     #     if not vacancy.salary or not vacancy.salary.to or not vacancy.salary.from_:
