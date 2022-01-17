@@ -1,55 +1,89 @@
 jobviz
 ==============================
 
-Парсинг вакансий с hh.ru, анализ, визуализация, предсказание зарплаты и профессии по навыкам
+Парсинг вакансий с hh.ru, анализ, визуализация, модели для прогноза зарплаты
 
-Project Organization
-------------
+------
+Есть возможность скачивать словари данных и вакансии с апи hh.ru с использованием прокси, которые меняются при достижении лимита запросов; обучать заранее спроектированные модели, создавать новые модели; визуализировать статистические и географические распределения данных; представлять вакансию в виде вектора
 
-    ├── LICENSE
-    ├── Makefile           <- Makefile with commands like `make data` or `make train`
-    ├── README.md          <- The top-level README for developers using this project.
-    ├── data
-    │   ├── external       <- Data from third party sources.
-    │   ├── interim        <- Intermediate data that has been transformed.
-    │   ├── processed      <- The final, canonical data sets for modeling.
-    │   └── raw            <- The original, immutable data dump.
-    │
-    ├── docs               <- A default Sphinx project; see sphinx-doc.org for details
-    │
-    ├── models             <- Trained and serialized models, model predictions, or model summaries
-    │
-    ├── notebooks          <- Jupyter notebooks. Naming convention is a number (for ordering),
-    │                         the creator's initials, and a short `-` delimited description, e.g.
-    │                         `1.0-jqp-initial-data-exploration`.
-    │
-    ├── references         <- Data dictionaries, manuals, and all other explanatory materials.
-    │
-    ├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
-    │   └── figures        <- Generated graphics and figures to be used in reporting
-    │
-    ├── requirements.txt   <- The requirements file for reproducing the analysis environment, e.g.
-    │                         generated with `pip freeze > requirements.txt`
-    │
-    ├── setup.py           <- makes project pip installable (pip install -e .) so src can be imported
-    ├── src                <- Source code for use in this project.
-    │   ├── __init__.py    <- Makes src a Python module
-    │   │
-    │   ├── data           <- Scripts to download or generate data
-    │   │   └── make_dataset.py
-    │   │
-    │   ├── features       <- Scripts to turn raw data into features for modeling
-    │   │   └── build_features.py
-    │   │
-    │   ├── models         <- Scripts to train models and then use trained models to make
-    │   │   │                 predictions
-    │   │   ├── predict_model.py
-    │   │   └── train_model.py
-    │   │
-    │   └── visualization  <- Scripts to create exploratory and results oriented visualizations
-    │       └── visualize.py
-    │
-    └── tox.ini            <- tox file with settings for running tox; see tox.readthedocs.io
+# Использование
+## Загрузка данных
+файл src.data.load_vacancies:
+```
+usage: load_vacancies.py [-h] [--db DB] [--db-host DB_HOST] [--db-port DB_PORT] [--proxy-file PROXY_FILE]
+                         [--proxy PROXY] [--verbose VERBOSE] [--date-from DATE_FROM] [--date-to DATE_TO]
+                         [--workers WORKERS] [--new-console]
 
+Загружает все вакансии за последний год
 
---------
+optional arguments:
+  -h, --help            show this help message and exit
+  --db DB               Имя бд (если не указано, берется из .env)
+  --db-host DB_HOST     Хост подключения к mongodb (если не указано, берется из .env)
+  --db-port DB_PORT     Порт подключения к mongodb (если не указано, берется из .env)
+  --proxy-file PROXY_FILE
+                        Файл со строками вида ip:port
+  --proxy PROXY, -p PROXY
+                        Прокси вида ip:port
+  --verbose VERBOSE, -v VERBOSE
+                        Управляет количеством сообщений
+                        0 - нет сообщений, 1 - сообщение о каждой сохраненной вакансии,
+                        n - сообщение о каждой n-ой сохраненной вакансии
+  --date-from DATE_FROM
+                        Дата, которая ограничивает снизу диапазон дат публикации вакансий
+  --date-to DATE_TO     Дата, которая ограничивает сверху диапазон дат публикации вакансий
+  --workers WORKERS, -w WORKERS
+                        Количество потоков
+  --new-console         Запускать скрипт для каждой прокси в отдельном терминале
+```
+файл src.data.load_dictionaries:
+```
+usage: load_dictionaries.py [-h] [--db DB] [--db-host DB_HOST] [--db-port DB_PORT] [--update] [--add-real-id]
+                            [--create-key-skills]
+
+Загружает и сохраняет все словари данных (https://api.hh.ru/dictionaries)
+
+optional arguments:
+  -h, --help           show this help message and exit
+  --db DB              Имя бд (если не указано, берется из .env)
+  --db-host DB_HOST    Хост подключения к mongodb (если не указано, берется из .env)
+  --db-port DB_PORT    Порт подключения к mongodb (если не указано, берется из .env)
+  --update             Не удалять коллекции если они существуют
+  --add-real-id        Добавить id типа int
+  --create-key-skills  Добавить все скилы
+```
+## Визуализация
+**Отчеты в формате [html](reports/html/) (рекомендуется)**
+
+Также доступны отчеты в формате [pdf](reports/pdf/) и [ipynb](notebooks) (не рекомендуется)
+
+### Примеры графиков
+![img.png](reports/res/img.png)
+![img.png](reports/res/img2.png)
+![img.png](reports/res/img3.png)
+### Обучение моделей
+файл src.models.description_to_salary.train:
+```
+usage: train.py [-h] [--db DB] [--db-host DB_HOST] [--db-port DB_PORT] [--limit LIMIT] [--verbose VERBOSE] [--epochs EPOCHS]
+                [--model MODEL] [--test-size TEST_SIZE] [--save] [--show-loss]
+
+Обучает модель для предсказания зарплаты по описанию
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --db DB               Имя бд (если не указано, берется из .env)
+  --db-host DB_HOST     Хост подключения к mongodb (если не указано, берется из .env)
+  --db-port DB_PORT     Порт подключения к mongodb (если не указано, берется из .env)
+  --limit LIMIT, -l LIMIT
+                        Количество данных, загружаемых из базы (default: 10000)
+  --verbose VERBOSE, -v VERBOSE
+                        Уровень многословности (default: 1)
+  --epochs EPOCHS, -e EPOCHS
+                        Количество эпох
+  --model MODEL, -m MODEL
+                        Название модели (default: 'basic')
+  --test-size TEST_SIZE
+                        Размер тестовой выборки (default: 0.2)
+  --save                Сохранить модель после обучение в папку models
+  --show-loss           Открыть график изменения loss
+```
