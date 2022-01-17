@@ -7,6 +7,7 @@ from requests.packages.urllib3 import Retry
 
 
 class CaptchaDodger(requests.Session):
+    """Сессия, которая меняет прокси при неудачном запросе"""
     def __init__(self, proxies: Dict[str, List] = None, verbose=True):
         super().__init__()
 

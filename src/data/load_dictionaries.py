@@ -96,13 +96,13 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    # load_dictionaries(
-    #     db_host=args.db_host,
-    #     db_port=args.db_port,
-    #     db_name=args.db,
-    #     update=args.update,
-    #     add_real_id=args.add_real_id
-    # )
+    load_dictionaries(
+        db_host=args.db_host,
+        db_port=args.db_port,
+        db_name=args.db,
+        update=args.update,
+        add_real_id=args.add_real_id
+    )
 
     if args.create_key_skills:
         create_key_skills(

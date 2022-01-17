@@ -1,4 +1,3 @@
-import os
 import subprocess
 import threading
 from datetime import datetime
@@ -10,9 +9,9 @@ from mongoengine import connect
 
 from src.data.api import get_vacancy, find_vacancies
 from src.data.coverage import Coverage
+from src.data.utils import CaptchaDodger
 from src.data.vacancy import Vacancy
 from src.utils import DefaultArgumentParser
-from src.data.utils import CaptchaDodger
 
 
 def find_vacancies_in_date_range(
@@ -109,7 +108,7 @@ def load_vacancies(
         proxy: str = '',
         proxy_file: str = '',
         verbose: int = 200,
-        terminals: bool = False,
+        new_console: bool = False,
         workers: int = 4
 ) -> None:
     """Получает и сохраняет все вакансии в диапазоне дат"""
@@ -125,7 +124,7 @@ def load_vacancies(
             with open(proxy_file, 'r') as proxy_file:
                 proxies = list(map(str.strip, proxy_file.readlines()))
 
-            if terminals:
+            if new_console:
                 date_step = (date_to - date_from) / workers
 
                 date_ranges = [
@@ -134,13 +133,15 @@ def load_vacancies(
                 ]
 
                 for proxy, date_range in zip(proxies, date_ranges):
-                    subprocess.call(f"C:\\Users\\uiqko\\projects\\jobviz\\venv\\Scripts\\python.exe -m "
-                                    f"src.data.load_vacancies "
-                                    f"--proxy-file=C:\\Users\\uiqko\\projects\\jobviz\\proxies.txt "
-                                    f'--verbose={verbose} '
-                                    f'--date-from={date_range[0].isoformat()} '
-                                    f'--date-to={date_range[1].isoformat()}',
-                                    close_fds=True, )
+                    t = threading.Thread(target=find_vacancies_in_date_range, args=date_range, kwargs=kwargs)
+                    t.start()
+                    # subprocess.call(f"path_to_python -m "
+                    #                 f"src.data.load_vacancies "
+                    #                 f"--proxy-file=path_to_proxies "
+                    #                 f'--verbose={verbose} '
+                    #                 f'--date-from={date_range[0].isoformat()} '
+                    #                 f'--date-to={date_range[1].isoformat()}',
+                    #                 close_fds=True)
                 return
 
             else:
@@ -174,13 +175,13 @@ if __name__ == '__main__':
     )
 
     parser.add_argument(
-        '--proxy',
+        '--proxy', '-p',
         default='',
         help="Прокси вида ip:port"
     )
 
     parser.add_argument(
-        '--verbose',
+        '--verbose', '-v',
         type=int,
         default=200,
         help='Управляет количеством сообщений'
@@ -201,14 +202,14 @@ if __name__ == '__main__':
     )
 
     parser.add_argument(
-        '--workers',
+        '--workers', '-w',
         type=int,
         default=4,
         help='Количество потоков'
     )
 
     parser.add_argument(
-        '--terminals',
+        '--new-console',
         action='store_true',
         help='Запускать скрипт для каждой прокси в отдельном терминале'
     )
@@ -224,6 +225,6 @@ if __name__ == '__main__':
         date_from=datetime.fromisoformat(args.date_from),
         date_to=datetime.fromisoformat(args.date_to),
         verbose=args.verbose,
-        terminals=args.terminals,
+        new_console=args.new_console,
         workers=args.workers
     )
