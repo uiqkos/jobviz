@@ -1,17 +1,14 @@
-import re
-from dataclasses import dataclass
 from typing import Dict, List, Union
 
 import numpy as np
 import spacy
 import tensorflow as tf
 from pymongo.database import Database
-from tensorflow.keras.layers.experimental.preprocessing import TextVectorization
-from tensorflow.keras.layers import Embedding
 from tensorflow.keras.initializers import Constant
+from tensorflow.keras.layers import Embedding
+from tensorflow.keras.layers.experimental.preprocessing import TextVectorization
 
 from src import settings
-from src.features.clean import remove_html
 
 nlp = spacy.load('ru_core_news_md')
 embedding_matrix: np.ndarray = np.array([nlp.vocab.vectors[orth] for orth in nlp.vocab.vectors])
@@ -31,7 +28,7 @@ def standardize_text(input_string):
 
 def get_text_vectorization():
     return TextVectorization(
-        output_sequence_length=200,
+        output_sequence_length=settings.MAX_DESCRIPTION_WORD_COUNT,
         standardize=standardize_text,
         vocabulary=strings,
     )
